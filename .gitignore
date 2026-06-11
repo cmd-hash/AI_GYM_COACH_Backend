@@ -1,0 +1,26 @@
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment Variables
+.env
+
+# Database Files
+*.db
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Model Files (optional if large)
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
