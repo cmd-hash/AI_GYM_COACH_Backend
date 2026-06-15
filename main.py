@@ -1,23 +1,22 @@
 import streamlit as st
 import os
 import time
-import cv2
-import numpy as np
 import pandas as pd
-from PIL import Image
 from services.auth.login_wall import render_login_wall
 from services.state.session_defaults import initial_session_defaults
 from services.config.workout_config import EXERCISE_OPTIONS
 from services.ui.style_loader import load_css, inject_local_font, inject_webrtc_styles
 from services.persistence.exercise_repository import init_db
+from streamlit_webrtc import webrtc_streamer, WebRtcMode
 from services.vision.exercise_video_processor import VideoProcessorClass
+from services.tracking.metrics import sync_metrics_update
 from services.persistence.exercise_repository import get_users_exercises
 from groq import Groq
 from services.coaching.llm import LLMCoach
 from services.coaching.tts import TextToSpeech
 from services.coaching.voice_pipeline import VoicePipeline, autoplay_audio
 
-
+  
 def main():
     st.set_page_config(
         page_icon="🏋️‍♀️",
@@ -32,7 +31,7 @@ def main():
     init_db()
 
     if not render_login_wall():
-        return
+        return 
 
     initial_session_defaults()
 
@@ -42,7 +41,7 @@ def main():
 
             if not api_key and hasattr(st, "secrets") and "GROQ_API_KEY" in st.secrets:
                 api_key = st.secrets["GROQ_API_KEY"]
-
+            
             groq_client = Groq(api_key=api_key)
             llm_coach = LLMCoach(groq_client)
             tts = TextToSpeech()
@@ -50,11 +49,8 @@ def main():
         except Exception as e:
             st.session_state.voice_pipeline = None
 
-    if "video_processor" not in st.session_state:
-        st.session_state.video_processor = VideoProcessorClass()
-
     workout_started = st.session_state.get("workout_started", False)
-
+    
     with st.sidebar:
         st.title("🏋️‍♂️ Apna AI Coach")
 
@@ -74,7 +70,7 @@ def main():
 
             st.markdown("")
 
-            start_session_button = st.button("Start Workout", use_container_width=True, key="start_session_button")
+            start_session_button = st.button("Start Workout", width="stretch", key="start_session_button")
 
             if start_session_button:
                 st.session_state.exercise_type = plan_exercise
@@ -91,7 +87,7 @@ def main():
                         exercise=plan_exercise,
                         metrics={}
                     )
-
+                    
                     if result:
                         st.session_state.audio_to_play, st.session_state.coach_feedback = result
 
@@ -105,11 +101,11 @@ def main():
 
             st.info(f"**{exercise}** -- {sets} Sets / {reps} Reps")
 
-            end_session_button = st.button("End Workout", key="end_session_button", use_container_width=True)
+            end_session_button = st.button("End Workout", key="end_session_button", width="stretch")
 
             if end_session_button:
                 st.session_state.workout_started = False
-
+                
                 if st.session_state.voice_pipeline:
                     result = st.session_state.voice_pipeline.process_event(
                         event="workout_completed",
@@ -124,53 +120,54 @@ def main():
         if workout_started:
             st.divider()
 
-            exercise      = st.session_state.get("exercise_type")
-            total_reps    = st.session_state.get("reps")
+            exercise = st.session_state.get("exercise_type")
+            total_reps = st.session_state.get("reps")
             current_set_reps = st.session_state.get("current_set_reps")
-            reps_per_set  = st.session_state.get("reps_per_set")
+            reps_per_set = st.session_state.get("reps_per_set")
             sets_completed = st.session_state.get("sets_completed")
-            target_sets   = st.session_state.get("target_sets")
+            target_sets = st.session_state.get("target_sets")
 
             st.subheader("Progress")
-            st.metric("Total Reps",       f"{total_reps}")
+
+            st.metric("Total Reps", f"{total_reps}")
             st.metric("Current Set Reps", f"{current_set_reps} / {reps_per_set}")
-            st.metric("Sets Completed",   f"{sets_completed} / {target_sets}")
+            st.metric("Sets Completed", f"{sets_completed} / {target_sets}")
 
             st.divider()
 
             if exercise == "Squats":
                 st.subheader("Squat Metrics")
-                st.metric("Knee Angle",   f"{st.session_state.knee_angle}°")
-                st.metric("Back Angle",   f"{st.session_state.back_angle}°")
+                st.metric("Knee Angle", f"{st.session_state.knee_angle}°")
+                st.metric("Back Angle", f"{st.session_state.back_angle}°")
                 st.metric("Depth Status", st.session_state.depth_status)
 
             elif exercise == "Push-ups":
                 st.subheader("Push-up Metrics")
-                st.metric("Elbow Angle",    f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
                 st.metric("Body Alignment", st.session_state.body_alignment)
-                st.metric("Hip Position",   st.session_state.hip_status)
+                st.metric("Hip Position", st.session_state.hip_status)
 
             elif exercise == "Biceps Curls (Dumbbell)":
                 st.subheader("Curl Metrics")
-                st.metric("Elbow Angle",        f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
                 st.metric("Shoulder Stability", st.session_state.shoulder_status)
-                st.metric("Swing Detection",    st.session_state.swing_status)
+                st.metric("Swing Detection", st.session_state.swing_status)
 
             elif exercise == "Shoulder Press":
                 st.subheader("Shoulder Press Metrics")
-                st.metric("Elbow Angle",   f"{st.session_state.elbow_angle}°")
+                st.metric("Elbow Angle", f"{st.session_state.elbow_angle}°")
                 st.metric("Arm Extension", st.session_state.extension_status)
-                st.metric("Back Arch",     st.session_state.back_arch_status)
+                st.metric("Back Arch", st.session_state.back_arch_status)
 
             elif exercise == "Lunges":
                 st.subheader("Lunge Metrics")
                 st.metric("Front Knee Angle", f"{st.session_state.front_knee_angle}°")
-                st.metric("Torso Angle",      f"{st.session_state.torso_angle}°")
-                st.metric("Balance Status",   st.session_state.balance_status)
+                st.metric("Torso Angle", f"{st.session_state.torso_angle}°")
+                st.metric("Balance Status", st.session_state.balance_status)
 
     st.title("AI Real-time GYM Coach")
     st.markdown("#### Real-time pose detection with proactive AI voice coaching")
-
+ 
     if st.session_state.get("audio_to_play"):
         autoplay_audio(st.session_state.audio_to_play)
 
@@ -200,42 +197,23 @@ def main():
             unsafe_allow_html=True,
         )
     else:
-        st.info("📷 Position yourself and take a photo — AI will analyse your pose.")
+        context = webrtc_streamer(
+            key="exercise-analysis",
+            mode=WebRtcMode.SENDRECV,
+            video_processor_factory=VideoProcessorClass,
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            media_stream_constraints={
+                "video": True,
+                "audio": False
+            },
+            async_processing=True
+        )
 
-        frame = st.camera_input("Show yourself to the camera")
+        sync_metrics_update(context)
 
-        if frame is not None:
-            try:
-                img       = Image.open(frame)
-                img_array = np.array(img)
-                img_bgr   = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-
-                processor    = st.session_state.video_processor
-                result_frame = processor.process_frame(img_bgr)
-
-                if result_frame is not None:
-                    result_rgb = cv2.cvtColor(result_frame, cv2.COLOR_BGR2RGB)
-                    st.image(result_rgb, use_container_width=True, caption="Pose Analysis")
-                else:
-                    st.image(img_array, use_container_width=True, caption="Camera Frame")
-
-                # trigger voice coaching after frame processed
-                if st.session_state.voice_pipeline:
-                    metrics = {
-                        "reps": st.session_state.get("reps", 0),
-                        "sets_completed": st.session_state.get("sets_completed", 0),
-                        "target_sets": st.session_state.get("target_sets", 0),
-                    }
-                    result = st.session_state.voice_pipeline.process_event(
-                        event="rep_completed",
-                        exercise=st.session_state.get("exercise_type", ""),
-                        metrics=metrics
-                    )
-                    if result:
-                        st.session_state.audio_to_play, st.session_state.coach_feedback = result
-
-            except Exception as e:
-                st.error(f"Error processing frame: {e}")
+        if context.state.playing:
+            time.sleep(0.25)
+            st.rerun()
 
         inject_webrtc_styles()
 
@@ -251,10 +229,10 @@ def main():
         arr = [
             {
                 "Exercise": row['exercise_name'],
-                "Reps":     row['reps'],
-                "Sets":     row['sets'],
+                "Reps": row['reps'],
+                "Sets": row['sets'],
                 "Time (sec)": row['time'],
-                "Date":     row['created_at']
+                "Date": row['created_at']
             }
             for row in history_rows
         ]
@@ -264,15 +242,16 @@ def main():
         if not df.empty:
             df["Date"] = pd.to_datetime(df["Date"]).dt.date
             agg_df = df.groupby(["Exercise", "Date"]).agg({
-                "Reps":       'sum',
-                "Sets":       "sum",
+                "Reps": 'sum',
+                "Sets": "sum",
                 "Time (sec)": "sum"
             }).reset_index()
             agg_df.index += 1
-            st.table(agg_df)
+            st.table(agg_df, border="horizontal")
         else:
             st.info("No workout history found.")
 
 
 if __name__ == "__main__":
     main()
+    
