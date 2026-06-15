@@ -1,13 +1,15 @@
 import streamlit as st
 import os
 import time
+import cv2
+import numpy as np
 import pandas as pd
+from PIL import Image
 from services.auth.login_wall import render_login_wall
 from services.state.session_defaults import initial_session_defaults
 from services.config.workout_config import EXERCISE_OPTIONS
 from services.ui.style_loader import load_css, inject_local_font, inject_webrtc_styles
 from services.persistence.exercise_repository import init_db
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from services.vision.exercise_video_processor import VideoProcessorClass
 from services.tracking.metrics import sync_metrics_update
 from services.persistence.exercise_repository import get_users_exercises
@@ -15,25 +17,6 @@ from groq import Groq
 from services.coaching.llm import LLMCoach
 from services.coaching.tts import TextToSpeech
 from services.coaching.voice_pipeline import VoicePipeline, autoplay_audio
-
-
-RTC_CONFIGURATION = RTCConfiguration(
-    {"iceServers": [
-        {"urls": ["stun:stun.l.google.com:19302"]},
-        {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-        {
-            "urls": ["turn:freestun.net:3479"],
-            "username": "free",
-            "credential": "free"
-        },
-        {
-            "urls": ["turns:freestun.net:5350"],
-            "username": "free",
-            "credential": "free"
-        }
-    ]}
-)
 
 
 def main():
@@ -67,6 +50,9 @@ def main():
             st.session_state.voice_pipeline = VoicePipeline(llm_coach, tts)
         except Exception as e:
             st.session_state.voice_pipeline = None
+
+    if "video_processor" not in st.session_state:
+        st.session_state.video_processor = VideoProcessorClass()
 
     workout_started = st.session_state.get("workout_started", False)
 
@@ -216,23 +202,29 @@ def main():
             unsafe_allow_html=True,
         )
     else:
-        context = webrtc_streamer(
-            key="exercise-analysis",
-            mode=WebRtcMode.SENDONLY,
-            video_processor_factory=VideoProcessorClass,
-            rtc_configuration=RTC_CONFIGURATION,
-            media_stream_constraints={
-                "video": True,
-                "audio": False
-            },
-            async_processing=True
-        )
+        st.info("📷 Take a photo to analyse your pose. Click the camera button below.")
 
-        sync_metrics_update(context)
+        frame = st.camera_input("Show yourself to the camera")
 
-        if context.state.playing:
-            time.sleep(0.25)
-            st.rerun()
+        if frame is not None:
+            try:
+                img = Image.open(frame)
+                img_array = np.array(img)
+                img_bgr = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+
+                processor = st.session_state.video_processor
+                result_frame = processor.process_frame(img_bgr)
+
+                if result_frame is not None:
+                    result_rgb = cv2.cvtColor(result_frame, cv2.COLOR_BGR2RGB)
+                    st.image(result_rgb, use_container_width=True, caption="Pose Analysis")
+                else:
+                    st.image(img_array, use_container_width=True, caption="Camera Frame")
+
+                sync_metrics_update(None)
+
+            except Exception as e:
+                st.error(f"Error processing frame: {e}")
 
         inject_webrtc_styles()
 
